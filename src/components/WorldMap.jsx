@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useTheme } from '../hooks/useTheme.jsx'
@@ -20,15 +20,23 @@ const WorldMap = () => {
   // Initialize the map
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return
+    
+    // Additional check to ensure the DOM element is ready
+    if (!mapRef.current.offsetParent && mapRef.current.style.display !== 'block') {
+      console.warn('Map container not visible, delaying initialization')
+      return
+    }
 
     // Define the world's inhabited area bounds (like Google Maps)
     const worldBounds = [
-      [-55, -Infinity],  // Bottom of Australia/South America to infinite west
-      [75, Infinity]     // Top of North America/Northern Europe to infinite east
+      [-85, -180],  // Bottom of world map
+      [85, 180]     // Top of world map
     ]
     
-    // Create the map with horizontal world wrapping enabled
-    const map = L.map(mapRef.current, {
+    // Ensure the map container is properly initialized
+    try {
+      // Create the map with horizontal world wrapping enabled
+      const map = L.map(mapRef.current, {
       center: [20, 0],
       zoom: 2,
       minZoom: 2,        // Prevent zooming out beyond the world area
@@ -111,6 +119,18 @@ const WorldMap = () => {
         mapInstanceRef.current = null
       }
     }
+    } catch (error) {
+      console.error('Error initializing map:', error)
+      // Try to clean up any partial initialization
+      if (mapInstanceRef.current) {
+        try {
+          mapInstanceRef.current.remove()
+          mapInstanceRef.current = null
+        } catch (cleanupError) {
+          console.error('Error cleaning up map:', cleanupError)
+        }
+      }
+    }
   }, [])
 
   // Handle theme changes
@@ -161,13 +181,13 @@ const WorldMap = () => {
       // Create the main countries layer
       const mainLayer = L.geoJSON(data, {
         style: (feature) => styleCountry(feature, newCountryColors),
-        onEachFeature: (feature, layer) => onEachCountry(feature, layer, map, newCountryColors)
+        onEachFeature: (feature, layer) => onEachCountry(feature, layer, map)
       })
       
       // Create wrapped copies of the layer (left and right)
       const leftLayer = L.geoJSON(data, {
         style: (feature) => styleCountry(feature, newCountryColors),
-        onEachFeature: (feature, layer) => onEachCountry(feature, layer, map, newCountryColors),
+        onEachFeature: (feature, layer) => onEachCountry(feature, layer, map),
         coordsToLatLng: function(coords) {
           return L.latLng(coords[1], coords[0] - 360) // Shift 360 degrees west
         }
@@ -175,7 +195,7 @@ const WorldMap = () => {
       
       const rightLayer = L.geoJSON(data, {
         style: (feature) => styleCountry(feature, newCountryColors),
-        onEachFeature: (feature, layer) => onEachCountry(feature, layer, map, newCountryColors),
+        onEachFeature: (feature, layer) => onEachCountry(feature, layer, map),
         coordsToLatLng: function(coords) {
           return L.latLng(coords[1], coords[0] + 360) // Shift 360 degrees east
         }
@@ -186,8 +206,21 @@ const WorldMap = () => {
       layerGroup.addLayer(leftLayer)
       layerGroup.addLayer(rightLayer)
       
-      // Add the layer group to the map
-      countriesLayerRef.current = layerGroup.addTo(map)
+      // Add the layer group to the map with error handling
+      if (map && layerGroup) {
+        try {
+          countriesLayerRef.current = layerGroup.addTo(map)
+        } catch (error) {
+          console.error('Error adding layer group to map:', error)
+          // Try fallback without wrapped layers
+          try {
+            countriesLayerRef.current = mainLayer.addTo(map)
+          } catch (fallbackError) {
+            console.error('Error adding main layer to map:', fallbackError)
+            createFallbackMap(map)
+          }
+        }
+      }
       
       // Set initial view to show the world nicely within bounds
       map.setView([10, 0], 2) // Slightly more centered view
@@ -214,7 +247,8 @@ const WorldMap = () => {
   // Style function for countries - Professional styling
   const styleCountry = (feature, colors = countryColors) => {
     const countryName = feature.properties.name || feature.properties.NAME || 'Unknown'
-    const color = colors[countryName] || colors[0]
+    const defaultColors = ['#28a745', '#dc3545', '#fd7e14'] // Green, Red, Orange - fallback
+    const color = colors[countryName] || defaultColors[0] || '#28a745'
     const borderColor = currentTheme === 'dark' ? '#374151' : '#ffffff'
     
     return {
@@ -229,10 +263,8 @@ const WorldMap = () => {
   }
 
   // Add interactivity to each country
-  const onEachCountry = (feature, layer, map, colors) => {
+  const onEachCountry = (feature, layer, map) => {
     const countryName = feature.properties.name || feature.properties.NAME || 'Unknown'
-    const color = colors[countryName] || colors[0]
-    const colorName = color === colors[0] ? 'Green' : color === colors[1] ? 'Red' : 'Orange'
     
     // Store the original style immediately after the layer is styled
     setTimeout(() => {
@@ -260,7 +292,14 @@ const WorldMap = () => {
       },
       click: function(e) {
         showCountryInfo(countryName, map)
-        map.fitBounds(e.target.getBounds())
+        try {
+          const bounds = e.target.getBounds()
+          if (bounds && bounds.isValid && bounds.isValid()) {
+            map.fitBounds(bounds)
+          }
+        } catch (error) {
+          console.warn('Could not fit bounds for country:', countryName, error)
+        }
       }
     })
   }
@@ -347,7 +386,7 @@ const WorldMap = () => {
 
   // Show country information popup - Simple name only
   const showCountryInfo = (countryName, map) => {
-    const popup = L.popup({
+    L.popup({
       className: 'professional-popup',
       closeButton: true,
       autoClose: false,
@@ -364,6 +403,11 @@ const WorldMap = () => {
 
   // Fallback map creation (in case the external GeoJSON fails)
   const createFallbackMap = (map) => {
+    if (!map) {
+      console.error('Map instance is null in createFallbackMap')
+      return
+    }
+    
     // Create sample countries with basic shapes
     const sampleCountries = [
       {
@@ -399,22 +443,37 @@ const WorldMap = () => {
     ]
     
     sampleCountries.forEach(country => {
-      const rectangle = L.rectangle(country.bounds, {
-        color: '#ffffff',
-        weight: 2,
-        fillColor: country.color,
-        fillOpacity: 0.7
-      }).addTo(map)
-      
-      rectangle.bindPopup(`<strong>${country.name}</strong><br>Sample country area`)
-      
-      rectangle.on('mouseover', function() {
-        this.setStyle({ fillOpacity: 0.9, weight: 3 })
-      })
-      
-      rectangle.on('mouseout', function() {
-        this.setStyle({ fillOpacity: 0.7, weight: 2 })
-      })
+      try {
+        // Validate bounds before creating rectangle
+        if (!country.bounds || !Array.isArray(country.bounds) || country.bounds.length !== 2) {
+          console.warn('Invalid bounds for country:', country.name)
+          return
+        }
+        
+        const rectangle = L.rectangle(country.bounds, {
+          color: '#ffffff',
+          weight: 2,
+          fillColor: country.color,
+          fillOpacity: 0.7
+        })
+        
+        if (map && rectangle) {
+          rectangle.addTo(map)
+          
+          rectangle.bindPopup(`<strong>${country.name}</strong><br>Sample country area`)
+          
+          rectangle.on('mouseover', function() {
+            this.setStyle({ fillOpacity: 0.9, weight: 3 })
+          })
+          
+          rectangle.on('mouseout', function() {
+            this.setStyle({ fillOpacity: 0.7, weight: 2 })
+          })
+        }
+      } catch (error) {
+        console.error('Error creating rectangle for country:', country.name, error)
+        return
+      }
     })
     
     // Set a nice world view for the fallback within bounds
@@ -477,7 +536,16 @@ const WorldMap = () => {
           layerGroup.eachLayer(function(layer) {
             if (layer.feature) {
               const countryName = layer.feature.properties.name || layer.feature.properties.NAME || 'Unknown'
-              const center = layer.getBounds().getCenter()
+              let center
+              try {
+                const bounds = layer.getBounds()
+                center = bounds && bounds.getCenter ? bounds.getCenter() : null
+              } catch (error) {
+                console.warn('Could not get bounds for layer:', countryName)
+                return
+              }
+              
+              if (!center) return
               
               const marker = L.marker(center, {
                 icon: L.divIcon({
@@ -494,7 +562,16 @@ const WorldMap = () => {
           })
         } else if (layerGroup.feature) {
           const countryName = layerGroup.feature.properties.name || layerGroup.feature.properties.NAME || 'Unknown'
-          const center = layerGroup.getBounds().getCenter()
+          let center
+          try {
+            const bounds = layerGroup.getBounds()
+            center = bounds && bounds.getCenter ? bounds.getCenter() : null
+          } catch (error) {
+            console.warn('Could not get bounds for layerGroup:', countryName)
+            return
+          }
+          
+          if (!center) return
           
           const marker = L.marker(center, {
             icon: L.divIcon({

@@ -1,4 +1,3 @@
-import React, { useState } from 'react'
 import { BrowserRouter as Router, NavLink, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider } from './hooks/useTheme.jsx'
 import WorldMap from './components/WorldMap.jsx'

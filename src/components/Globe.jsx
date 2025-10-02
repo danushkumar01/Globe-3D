@@ -1,8 +1,11 @@
-import React, { useRef, useState, useEffect } from 'react';
+/* eslint-disable react/no-unknown-property */
+/* eslint-disable react/prop-types */
+import { useRef, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Text, Billboard } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { loadAllEarthTextures } from './RealEarthTextures';
+import '../globe/index.css';
 
 // Create fallback texture
 const createFallbackTexture = () => {
@@ -189,30 +192,12 @@ const CountryMarker = ({ country, onClick, isSelected }) => {
         </mesh>
       )}
       
-      {/* Country name label */}
-      <Billboard
-        follow={true}
-        lockX={false}
-        lockY={false}
-        lockZ={false}
-      >
-        <Text
-          position={[0, 0.25, 0]}
-          fontSize={0.08}
-          color="white"
-          anchorX="center"
-          anchorY="middle"
-          outlineWidth={0.015}
-          outlineColor="#000000"
-        >
-          {country.name}
-        </Text>
-      </Billboard>
+      {/* Country name label - now handled by HTML overlay */}
     </group>
   );
 };
 
-const RealisticEarth = ({ selectedCountry, onCountryClick }) => {
+const RealisticEarth = ({ selectedCountry, onCountryClick, onLoadingChange }) => {
   const earthRef = useRef();
   const cloudsRef = useRef();
   const [textures, setTextures] = useState(null);
@@ -243,6 +228,7 @@ const RealisticEarth = ({ selectedCountry, onCountryClick }) => {
             });
           }
           setLoading(false);
+          if (onLoadingChange) onLoadingChange(false);
         }
       } catch (error) {
         console.error('❌ Error loading textures:', error);
@@ -257,6 +243,7 @@ const RealisticEarth = ({ selectedCountry, onCountryClick }) => {
             clouds: fallback,
           });
           setLoading(false);
+          if (onLoadingChange) onLoadingChange(false);
         }
       }
     };
@@ -264,7 +251,7 @@ const RealisticEarth = ({ selectedCountry, onCountryClick }) => {
     loadTextures();
     
     return () => { isMounted = false; };
-  }, []);
+  }, [onLoadingChange]);
 
   // NO AUTOMATIC ROTATION - Globe is completely static
   useFrame(() => {
@@ -279,9 +266,7 @@ const RealisticEarth = ({ selectedCountry, onCountryClick }) => {
           <sphereGeometry args={[5, 64, 32]} />
           <meshPhongMaterial color="#1a5490" />
         </mesh>
-        <Text position={[0, 0, 6]} fontSize={0.5} color="white">
-          Loading Earth...
-        </Text>
+        {/* Loading state handled by HTML overlay */}
       </group>
     );
   }
@@ -364,13 +349,25 @@ const RealisticEarth = ({ selectedCountry, onCountryClick }) => {
 
 const Globe = () => {
   const [selectedCountry, setSelectedCountry] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const handleCountryClick = (country) => {
     setSelectedCountry(selectedCountry?.id === country.id ? null : country);
   };
 
   return (
-    <div className="w-full h-screen relative overflow-hidden bg-gradient-to-b from-blue-900 via-indigo-900 to-black">
+    <div className="w-full h-screen relative overflow-hidden globe-container">
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="text-center text-white">
+            <div className="animate-pulse-slow text-6xl mb-4">🌍</div>
+            <div className="text-2xl font-bold mb-2">Loading Earth...</div>
+            <div className="text-gray-300">Preparing 3D globe textures</div>
+          </div>
+        </div>
+      )}
+
       {/* Background stars */}
       <div className="absolute inset-0">
         {[...Array(200)].map((_, i) => (
@@ -388,8 +385,10 @@ const Globe = () => {
         ))}
       </div>
 
+
+
       {/* Header */}
-      <div className="absolute top-4 left-4 z-10">
+      <div className="absolute top-4 left-4 z-10 float-animation">
         <h1 className="text-3xl font-bold text-white mb-2">
           🌍 Global News Sentiment Monitor
         </h1>
@@ -406,7 +405,7 @@ const Globe = () => {
       </div>
 
       {/* Legend */}
-      <div className="absolute bottom-4 right-4 z-10 bg-black bg-opacity-80 text-white p-4 rounded-lg">
+      <div className="absolute bottom-4 right-4 z-10 bg-black bg-opacity-80 text-white p-4 rounded-lg glow-animation">
         <h3 className="text-sm font-bold mb-2">Sentiment Legend</h3>
         <div className="space-y-1 text-xs">
           <div className="flex items-center gap-2">
@@ -434,7 +433,7 @@ const Globe = () => {
 
       {/* News Panel - RIGHT SIDE */}
       {selectedCountry && (
-        <div className="absolute top-0 right-0 h-screen w-96 bg-black bg-opacity-95 text-white z-10 flex flex-col shadow-2xl">
+        <div className="absolute top-0 right-0 h-screen w-96 news-panel text-white z-10 flex flex-col shadow-2xl">
           {/* Panel Header */}
           <div className="p-6 border-b border-gray-700">
             <div className="flex justify-between items-start mb-3">
@@ -575,6 +574,7 @@ const Globe = () => {
         <RealisticEarth 
           selectedCountry={selectedCountry}
           onCountryClick={handleCountryClick}
+          onLoadingChange={setIsLoading}
         />
         
         <OrbitControls 
